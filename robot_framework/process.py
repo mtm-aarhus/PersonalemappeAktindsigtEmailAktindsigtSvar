@@ -5,30 +5,30 @@ import smtplib
 from email.message import EmailMessage
 import json
 from  datetime import datetime 
-import pyodbc
-def insert_email_text(cur, mailtekst, caseid):
-    # 1) cases
-    cur.execute("""
-        INSERT INTO dbo.cases (
-           EmailtekstUdlevering 
-        )
-        VALUES (?)
-    """, (mailtekst)
+import html
+import re
+from sqlalchemy import create_engine, text
+from urllib.parse import quote_plus
+
+def text_to_html(body: str) -> str:
+    """Konverterer plain text med linjeskift til HTML med <br> og klikbare links."""
+    if not body:
+        return ""
+
+    # Escapér HTML-tegn (<, >, & osv.)
+    safe = html.escape(body)
+
+    # Gør links klikbare
+    safe = re.sub(
+        r"(https?://[^\s]+)",
+        r'<a href="\1" target="_blank">\1</a>',
+        safe
     )
 
-    # 3) caselogs — inkl. UTC timestamp
-    utc_now = datetime.now()
-    cur.execute("""
-        INSERT INTO dbo.caselogs (case_aktid, message, field, action, [user], [timestamp])
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        caseid,
-        "Mail sendt med udleveringslink",
-        "status",
-        "modtaget",
-        "System",
-        utc_now
-    ))
+    # Erstat linjeskift med <br>
+    html_body = safe.replace("\n", "<br>\n")
+
+    return html_body
 
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     specific_content = json.loads(queue_element.data)
@@ -49,7 +49,7 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     msg['From'] = SagsbehandlerMail
     msg['Subject'] = subject
     msg.set_content("Please enable HTML to view this message.")
-    msg.add_alternative(body, subtype='html')
+    msg.add_alternative(text_to_html(body), subtype='html')
     msg['Bcc'] = UdviklerMail
 
     # Send the email using SMTP
@@ -60,9 +60,33 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
         orchestrator_connection.log_info(f"Failed to send success email: {e}")
         raise e
     #----------------- Here the case details are sent to the database
-    sql_server = orchestrator_connection.get_constant("SqlServer").value  
-    conn_string = f"DRIVER={{SQL Server}};SERVER={sql_server};DATABASE=AKTINDSIGTERPERSONALEMAPPER;Trusted_Connection=yes;"
-    conn = pyodbc.connect(conn_string)
-    conn.autocommit = False
-    cur = conn.cursor()
-    insert_email_text(cur, body, caseid)
+    SQL_SERVER = orchestrator_connection.get_constant('SqlServer').value 
+    DATABASE_NAME = "AktindsigterPersonalemapper"
+
+    odbc_str = (
+        "DRIVER={SQL Server};"
+        f"SERVER={SQL_SERVER};"
+        f"DATABASE={DATABASE_NAME};"
+        "Trusted_Connection=yes;"
+    )
+
+    odbc_str_quoted = quote_plus(odbc_str)
+    engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_str_quoted}", future=True)
+
+    sql = text("""
+        UPDATE dbo.cases
+        SET EmailtekstUdlevering = :body,
+        WHERE aktid = :caseid
+    """)
+
+    with engine.begin() as conn:
+        result = conn.execute(sql, {
+            "body": text_to_html(body),
+            "ts": datetime.now(),
+            "caseid": str(caseid)
+        })
+        if result.rowcount == 0:
+            orchestrator_connection.log_info(f"⚠️ Ingen sag fundet med aktid={caseid}")
+        else:
+            orchestrator_connection.log_info(f"✅ Opdateret sag {caseid} med svarmail:")
+
