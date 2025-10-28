@@ -36,7 +36,7 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     IndsenderMail = specific_content.get("to")
     SagsbehandlerMail = specific_content.get("from")
     UdviklerMail = orchestrator_connection.get_constant('balas')
-    body = text_to_html(specific_content.get('body'))
+    body = specific_content.get('body')
     subject = specific_content.get('subject')
 
 
@@ -49,7 +49,7 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     msg['From'] = SagsbehandlerMail
     msg['Subject'] = subject
     msg.set_content("Please enable HTML to view this message.")
-    msg.add_alternative(body, subtype='html')
+    msg.add_alternative(text_to_html(body), subtype='html')
     msg['Bcc'] = UdviklerMail
 
     # Send the email using SMTP
