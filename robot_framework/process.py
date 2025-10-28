@@ -59,34 +59,3 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     except Exception as e:
         orchestrator_connection.log_info(f"Failed to send success email: {e}")
         raise e
-    #----------------- Here the case details are sent to the database
-    SQL_SERVER = orchestrator_connection.get_constant('SqlServer').value 
-    DATABASE_NAME = "AktindsigterPersonalemapper"
-
-    odbc_str = (
-        "DRIVER={SQL Server};"
-        f"SERVER={SQL_SERVER};"
-        f"DATABASE={DATABASE_NAME};"
-        "Trusted_Connection=yes;"
-    )
-
-    odbc_str_quoted = quote_plus(odbc_str)
-    engine = create_engine(f"mssql+pyodbc:///?odbc_connect={odbc_str_quoted}", future=True)
-
-    sql = text("""
-        UPDATE dbo.cases
-        SET EmailtekstUdlevering = :body
-        WHERE aktid = :caseid
-    """)
-
-    with engine.begin() as conn:
-        result = conn.execute(sql, {
-            "body": body,
-            "ts": datetime.now(),
-            "caseid": str(caseid)
-        })
-        if result.rowcount == 0:
-            orchestrator_connection.log_info(f"⚠️ Ingen sag fundet med aktid={caseid}")
-        else:
-            orchestrator_connection.log_info(f"✅ Opdateret sag {caseid} med svarmail:")
-
