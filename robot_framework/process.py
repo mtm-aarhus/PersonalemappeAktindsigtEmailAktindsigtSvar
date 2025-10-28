@@ -75,7 +75,7 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
 
     sql = text("""
         UPDATE dbo.cases
-        SET EmailtekstUdlevering = :body,
+        SET EmailtekstUdlevering = :body
         WHERE aktid = :caseid
     """)
 
