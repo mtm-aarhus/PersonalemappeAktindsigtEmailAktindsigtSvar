@@ -69,9 +69,9 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     try:
         #Sætter brugerstyring på go-udleveringsmappe - aktiveres først, når vi opretter i produktionsmiljøet
         ITEM_ID = "1249"
-        # session = create_ntlm_session(go_username, go_password)
-        # update_case_owner(go_api_url, go_username, go_password, caseid, ITEM_ID, SagsbehandlerMail, IndsenderMail)
-        # close_case(go_api_url= go_api_url, case_id = CaseID, session = session)
+        session = create_ntlm_session(go_username, go_password)
+        update_case_owner(go_api_url, go_username, go_password, caseid, ITEM_ID, SagsbehandlerMail, IndsenderMail)
+        close_case(go_api_url= go_api_url, case_id = caseid, session = session)
     except Exception as e:
         orchestrator_connection.log_error(f'Process failed to assign users to case {e}')
         raise e
