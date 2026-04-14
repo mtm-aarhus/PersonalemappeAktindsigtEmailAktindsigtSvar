@@ -9,6 +9,7 @@ import html
 import re
 from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
+from GoBrugerstyring import *
 
 def text_to_html(body: str) -> str:
     """Konverterer plain text med linjeskift til HTML med <br> og klikbare links."""
@@ -30,6 +31,7 @@ def text_to_html(body: str) -> str:
 
     return html_body
 
+
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     specific_content = json.loads(queue_element.data)
     caseid = specific_content.get("caseid")
@@ -38,6 +40,10 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     UdviklerMail = orchestrator_connection.get_constant('balas')
     body = specific_content.get('body')
     subject = specific_content.get('subject')
+    go_api_url = orchestrator_connection.get_constant("GOApiURL").value
+    go_api_login = orchestrator_connection.get_credential("GOAktApiUser")
+    go_username = go_api_login.username
+    go_password = go_api_login.password
 
 
     # SMTP Configuration (from your provided details)
@@ -59,3 +65,14 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     except Exception as e:
         orchestrator_connection.log_info(f"Failed to send success email: {e}")
         raise e
+    
+    try:
+        #Sætter brugerstyring på go-udleveringsmappe - aktiveres først, når vi opretter i produktionsmiljøet
+        ITEM_ID = "1249"
+        # session = create_ntlm_session(go_username, go_password)
+        # update_case_owner(go_api_url, go_username, go_password, caseid, ITEM_ID, SagsbehandlerMail, IndsenderMail)
+        # close_case(go_api_url= go_api_url, case_id = CaseID, session = session)
+    except Exception as e:
+        orchestrator_connection.log_error(f'Process failed to assign users to case {e}')
+        raise e
+
