@@ -36,9 +36,11 @@ def text_to_html(body: str) -> str:
 def finaliser_dokumenter(go_api_url: str, doc_ids: list, session: requests.Session, orchestrator_connection: OrchestratorConnection):
     """Gør dokumenter endelige inden sagen lukkes."""
     url = f"{go_api_url}/_goapi/Documents/Finalize/ByDocumentId"
-    response = session.post(url, data=json.dumps({"DocumentIds": doc_ids}), headers={"Content-Type": "application/json"})
-    orchestrator_connection.log_info(f"Finaliser response status: {response.status_code}")
-    orchestrator_connection.log_info(f"Finaliser response body: {response.text}")
+    payload = json.dumps({
+        "DocumentIds": doc_ids,
+        "ShouldCloseOpenTasks": False
+    })
+    response = session.post(url, data=payload, headers={"Content-Type": "application/json"})
     response.raise_for_status()
     orchestrator_connection.log_info(f"Endeliggjorde {len(doc_ids)} dokumenter.")
     
