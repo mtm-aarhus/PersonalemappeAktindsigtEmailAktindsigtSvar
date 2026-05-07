@@ -33,7 +33,13 @@ def text_to_html(body: str) -> str:
     html_body = safe.replace("\n", "<br>\n")
 
     return html_body
-
+def finaliser_dokumenter(go_api_url: str, doc_ids: list, session: requests.Session, orchestrator_connection: OrchestratorConnection):
+    """Gør dokumenter endelige inden sagen lukkes."""
+    url = f"{go_api_url}/_goapi/Documents/Finalize/ByDocumentId"
+    response = session.post(url, data=json.dumps({"DocumentIds": doc_ids}), headers={"Content-Type": "application/json"})
+    response.raise_for_status()
+    orchestrator_connection.log_info(f"Endeliggjorde {len(doc_ids)} dokumenter.")
+    
 def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
     response = session.get(f"{go_api_url}/_goapi/Cases/Metadata/{case_id}/False")
     response.raise_for_status()
@@ -109,6 +115,7 @@ def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, or
         response = session.post(url, data=json.dumps({"DocumentIds": doc_ids}), headers={"Content-Type": "application/json"})
         response.raise_for_status()
         orchestrator_connection.log_info(f"Journaliserede {len(doc_ids)} dokumenter.")
+        finaliser_dokumenter(go_api_url, doc_ids, session, orchestrator_connection)
 
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     specific_content = json.loads(queue_element.data)
