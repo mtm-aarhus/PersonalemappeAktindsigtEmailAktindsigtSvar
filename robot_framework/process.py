@@ -35,13 +35,17 @@ def text_to_html(body: str) -> str:
     return html_body
 def finaliser_dokumenter(go_api_url: str, doc_ids: list, session: requests.Session, orchestrator_connection: OrchestratorConnection):
     """Gør dokumenter endelige inden sagen lukkes."""
-    url = f"{go_api_url}/_goapi/Documents/Finalize/ByDocumentId"
+    url = f"{go_api_url}/_goapi/Documents/FinalizeMultiple/ByDocumentId"
     payload = json.dumps({
         "DocumentIds": doc_ids,
         "ShouldCloseOpenTasks": False
     })
     response = session.post(url, data=payload, headers={"Content-Type": "application/json"})
     response.raise_for_status()
+    result = response.json()
+    orchestrator_connection.log_info(f"Finaliser response: {result}")
+    if not result.get("Success"):
+        raise Exception(f"Endeliggørelse fejlede: {result.get('Message')}")
     orchestrator_connection.log_info(f"Endeliggjorde {len(doc_ids)} dokumenter.")
     
 def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
