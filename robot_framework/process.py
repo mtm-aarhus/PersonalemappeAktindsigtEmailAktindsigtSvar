@@ -105,7 +105,7 @@ def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, or
             response.raise_for_status()
             data = response.json()
 
-            doc_ids.extend(str(row.get("DocID")) for row in data.get("Row", []) if row.get("DocID"))
+            doc_ids.extend(int(row.get("DocID")) for row in data.get("Row", []) if row.get("DocID"))
 
             next_href = data.get("NextHref")
             more_pages = bool(next_href)
