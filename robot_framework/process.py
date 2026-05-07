@@ -35,21 +35,43 @@ def text_to_html(body: str) -> str:
 
 def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
     """Henter alle dokumenter på sagen og journaliserer dem inden lukning."""
-    # Hent sagens relative URL via metadata
     response = session.get(f"{go_api_url}/_goapi/Cases/Metadata/{case_id}/False")
     response.raise_for_status()
     metadata_str = response.json().get("Metadata")
     xdoc = ET.fromstring(metadata_str)
     relative_case_url = xdoc.attrib.get("ows_CaseUrl")
 
-    # Hent dokumenter på sagen
-    list_url = f"'/{relative_case_url}/Dokumenter'"
-    url = f"{go_api_url}/{relative_case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}"
-    payload = json.dumps({"parameters": {"__metadata": {"type": "SP.RenderListDataParameters"}, "ViewXml": "<View><RowLimit>500</RowLimit></View>"}})
-    response = session.post(url, headers={"content-type": "application/json;odata=verbose"}, data=payload)
+    # Find ViewId for ikke-journaliserede dokumenter
+    response = session.get(f"{go_api_url}/{relative_case_url}/_goapi/Administration/GetLeftMenuCounter")
     response.raise_for_status()
+    view_id = None
+    for item in response.json():
+        if item.get("ViewName") == "Ikkejournaliseret.aspx":
+            view_id = item.get("ViewId")
+            break
 
-    doc_ids = [str(row.get("DocID")) for row in response.json().get("Row", []) if row.get("DocID")]
+    if not view_id:
+        orchestrator_connection.log_info("Ingen ikke-journaliserede dokumenter fundet.")
+        return
+
+    # Hent alle ikke-journaliserede dokumenter med paginering
+    list_url = f"'/{relative_case_url}/Dokumenter'"
+    base_url = f"{go_api_url}/{relative_case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}&View={view_id}"
+    payload = json.dumps({"parameters": {"__metadata": {"type": "SP.RenderListDataParameters"}, "ViewXml": "<View><RowLimit Paged=\"TRUE\">100</RowLimit></View>"}})
+    headers = {"content-type": "application/json;odata=verbose"}
+
+    doc_ids = []
+    url = base_url
+    while True:
+        response = session.post(url, headers=headers, data=payload)
+        response.raise_for_status()
+        data = response.json()
+        doc_ids.extend(str(row.get("DocID")) for row in data.get("Row", []) if row.get("DocID"))
+
+        next_href = data.get("NextHref")
+        if not next_href:
+            break
+        url = f"{go_api_url}/{relative_case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}{next_href.replace('?', '&')}"
 
     if doc_ids:
         url = f"{go_api_url}/_goapi/Documents/MarkMultipleAsCaseRecord/ByDocumentId"
