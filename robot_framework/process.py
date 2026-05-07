@@ -150,6 +150,8 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
         update_case_owner(go_api_url, go_username, go_password, udleveringsmappeid, IndsenderMail)
         journaliser_sag(go_api_url, udleveringsmappeid, session, orchestrator_connection)
         close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
+        result = close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
+        orchestrator_connection.log_info(f"close_case response: {result}")
     except Exception as e:
         orchestrator_connection.log_error(f'Process failed: {e}')
         raise e
