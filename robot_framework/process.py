@@ -37,6 +37,8 @@ def finaliser_dokumenter(go_api_url: str, doc_ids: list, session: requests.Sessi
     """Gør dokumenter endelige inden sagen lukkes."""
     url = f"{go_api_url}/_goapi/Documents/Finalize/ByDocumentId"
     response = session.post(url, data=json.dumps({"DocumentIds": doc_ids}), headers={"Content-Type": "application/json"})
+    orchestrator_connection.log_info(f"Finaliser response status: {response.status_code}")
+    orchestrator_connection.log_info(f"Finaliser response body: {response.text}")
     response.raise_for_status()
     orchestrator_connection.log_info(f"Endeliggjorde {len(doc_ids)} dokumenter.")
     
@@ -55,7 +57,6 @@ def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, or
     journaliseret_id = None
 
     for item in response.json():
-        orchestrator_connection.log_info(f"ViewName: {item.get('ViewName')} - ViewId: {item.get('ViewId')}")
         if item.get("ViewName") == "Ikkejournaliseret.aspx":
             ikke_journaliseret_id = item.get("ViewId")
             if ikke_journaliseret_id is None:
