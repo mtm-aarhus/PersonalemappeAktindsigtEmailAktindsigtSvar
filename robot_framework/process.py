@@ -10,6 +10,8 @@ import re
 from sqlalchemy import create_engine, text
 from urllib.parse import quote_plus
 from GoBrugerstyring import *
+import json
+import xml.etree.ElementTree as ET
 
 def text_to_html(body: str) -> str:
     """Konverterer plain text med linjeskift til HTML med <br> og klikbare links."""
@@ -31,6 +33,29 @@ def text_to_html(body: str) -> str:
 
     return html_body
 
+def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
+    """Henter alle dokumenter på sagen og journaliserer dem inden lukning."""
+    # Hent sagens relative URL via metadata
+    response = session.get(f"{go_api_url}/_goapi/Cases/Metadata/{case_id}/False")
+    response.raise_for_status()
+    metadata_str = response.json().get("Metadata")
+    xdoc = ET.fromstring(metadata_str)
+    relative_case_url = xdoc.attrib.get("ows_CaseUrl")
+
+    # Hent dokumenter på sagen
+    list_url = f"'/{relative_case_url}/Dokumenter'"
+    url = f"{go_api_url}/{relative_case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}"
+    payload = json.dumps({"parameters": {"__metadata": {"type": "SP.RenderListDataParameters"}, "ViewXml": "<View><RowLimit>500</RowLimit></View>"}})
+    response = session.post(url, headers={"content-type": "application/json;odata=verbose"}, data=payload)
+    response.raise_for_status()
+
+    doc_ids = [str(row.get("DocID")) for row in response.json().get("Row", []) if row.get("DocID")]
+
+    if doc_ids:
+        url = f"{go_api_url}/_goapi/Documents/MarkMultipleAsCaseRecord/ByDocumentId"
+        response = session.post(url, data=json.dumps({"DocumentIds": doc_ids}), headers={"Content-Type": "application/json"})
+        response.raise_for_status()
+        orchestrator_connection.log_info(f"Journaliserede {len(doc_ids)} dokumenter.")
 
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     specific_content = json.loads(queue_element.data)
@@ -68,11 +93,11 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
         raise e
     
     try:
-        #Sætter brugerstyring på go-udleveringsmappe - aktiveres først, når vi opretter i produktionsmiljøet
         session = create_ntlm_session(go_username, go_password)
         update_case_owner(go_api_url, go_username, go_password, udleveringsmappeid, IndsenderMail)
-        close_case(go_api_url= go_api_url, case_id = udleveringsmappeid, session = session)
+        journaliser_sag(go_api_url, udleveringsmappeid, session, orchestrator_connection)
+        close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
     except Exception as e:
-        orchestrator_connection.log_error(f'Process failed to assign users to case {e}')
+        orchestrator_connection.log_error(f'Process failed: {e}')
         raise e
 
