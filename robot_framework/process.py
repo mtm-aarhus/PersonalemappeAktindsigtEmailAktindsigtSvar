@@ -12,6 +12,7 @@ from urllib.parse import quote_plus
 from GoBrugerstyring import *
 import json
 import xml.etree.ElementTree as ET
+import re
 
 def text_to_html(body: str) -> str:
     """Konverterer plain text med linjeskift til HTML med <br> og klikbare links."""
@@ -34,45 +35,74 @@ def text_to_html(body: str) -> str:
     return html_body
 
 def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
-    """Henter alle dokumenter på sagen og journaliserer dem inden lukning."""
     response = session.get(f"{go_api_url}/_goapi/Cases/Metadata/{case_id}/False")
     response.raise_for_status()
     metadata_str = response.json().get("Metadata")
     xdoc = ET.fromstring(metadata_str)
     relative_case_url = xdoc.attrib.get("ows_CaseUrl")
 
-    # Find ViewId for ikke-journaliserede dokumenter
+    # Find ViewId - med fallback til HTML-parsing hvis ViewId er None
     response = session.get(f"{go_api_url}/{relative_case_url}/_goapi/Administration/GetLeftMenuCounter")
     response.raise_for_status()
-    view_id = None
+    
+    ikke_journaliseret_id = None
+    journaliseret_id = None
+
     for item in response.json():
         orchestrator_connection.log_info(f"ViewName: {item.get('ViewName')} - ViewId: {item.get('ViewId')}")
         if item.get("ViewName") == "Ikkejournaliseret.aspx":
-            view_id = item.get("ViewId")
-            break
+            ikke_journaliseret_id = item.get("ViewId")
+            if ikke_journaliseret_id is None:
+                link_url = item.get("LinkUrl")
+                html_response = session.get(f"{go_api_url}{link_url}")
+                match = re.search(r'_spPageContextInfo\s*=\s*({.*?});', html_response.text, re.DOTALL)
+                if match:
+                    context_info = json.loads(match.group(1))
+                    ikke_journaliseret_id = context_info.get("viewId", "").strip("{}")
+        elif item.get("ViewName") == "Journaliseret.aspx":
+            journaliseret_id = item.get("ViewId")
+            if journaliseret_id is None:
+                link_url = item.get("LinkUrl")
+                html_response = session.get(f"{go_api_url}{link_url}")
+                match = re.search(r'_spPageContextInfo\s*=\s*({.*?});', html_response.text, re.DOTALL)
+                if match:
+                    context_info = json.loads(match.group(1))
+                    journaliseret_id = context_info.get("viewId", "").strip("{}")
 
-    if not view_id:
+    view_ids = [vid for vid in [ikke_journaliseret_id] if vid]
+    if not view_ids:
         orchestrator_connection.log_info("Ingen ikke-journaliserede dokumenter fundet.")
         return
 
-    # Hent alle ikke-journaliserede dokumenter med paginering
-    list_url = f"'/{relative_case_url}/Dokumenter'"
-    base_url = f"{go_api_url}/{relative_case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}&View={view_id}"
-    payload = json.dumps({"parameters": {"__metadata": {"type": "SP.RenderListDataParameters"}, "ViewXml": "<View><RowLimit Paged=\"TRUE\">100</RowLimit></View>"}})
-    headers = {"content-type": "application/json;odata=verbose"}
+    # Hent dokumenter med paginering
+    Akt = relative_case_url.split("/")[1]
+    encoded_sags_id = relative_case_url.rsplit("/")[-1].replace("-", "%2D")
+    list_url = f"%27%2Fcases%2F{Akt}%2F{encoded_sags_id}%2FDokumenter%27"
 
     doc_ids = []
-    url = base_url
-    while True:
-        response = session.post(url, headers=headers, data=payload)
-        response.raise_for_status()
-        data = response.json()
-        doc_ids.extend(str(row.get("DocID")) for row in data.get("Row", []) if row.get("DocID"))
+    for view_id in view_ids:
+        firstrun = True
+        more_pages = True
+        next_href = None
+        base_url = f"{go_api_url}/{relative_case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream"
 
-        next_href = data.get("NextHref")
-        if not next_href:
-            break
-        url = f"{go_api_url}/{relative_case_url}/_api/web/GetList(@listUrl)/RenderListDataAsStream?@listUrl={list_url}{next_href.replace('?', '&')}"
+        while more_pages:
+            if firstrun:
+                url = f"{base_url}?@listUrl={list_url}&View={view_id}"
+            else:
+                url = f"{base_url}?@listUrl={list_url}{next_href.replace('?', '&')}"
+
+            response = session.post(url, timeout=500)
+            response.raise_for_status()
+            data = response.json()
+
+            doc_ids.extend(str(row.get("DocID")) for row in data.get("Row", []) if row.get("DocID"))
+
+            next_href = data.get("NextHref")
+            more_pages = bool(next_href)
+            firstrun = False
+
+    orchestrator_connection.log_info(f"Fandt {len(doc_ids)} ikke-journaliserede dokumenter.")
 
     if doc_ids:
         url = f"{go_api_url}/_goapi/Documents/MarkMultipleAsCaseRecord/ByDocumentId"
