@@ -46,6 +46,7 @@ def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, or
     response.raise_for_status()
     view_id = None
     for item in response.json():
+        orchestrator_connection.log_info(f"ViewName: {item.get('ViewName')} - ViewId: {item.get('ViewId')}")
         if item.get("ViewName") == "Ikkejournaliseret.aspx":
             view_id = item.get("ViewId")
             break
