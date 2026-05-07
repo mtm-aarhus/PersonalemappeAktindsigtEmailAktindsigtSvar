@@ -75,7 +75,7 @@ def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, or
                     context_info = json.loads(match.group(1))
                     journaliseret_id = context_info.get("viewId", "").strip("{}")
 
-    view_ids = [vid for vid in [ikke_journaliseret_id] if vid]
+    view_ids = [vid for vid in [ikke_journaliseret_id, journaliseret_id] if vid]
     if not view_ids:
         orchestrator_connection.log_info("Ingen ikke-journaliserede dokumenter fundet.")
         return
@@ -111,11 +111,12 @@ def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, or
     orchestrator_connection.log_info(f"Fandt {len(doc_ids)} ikke-journaliserede dokumenter.")
 
     if doc_ids:
+        finaliser_dokumenter(go_api_url, doc_ids, session, orchestrator_connection)
+        
         url = f"{go_api_url}/_goapi/Documents/MarkMultipleAsCaseRecord/ByDocumentId"
         response = session.post(url, data=json.dumps({"DocumentIds": doc_ids}), headers={"Content-Type": "application/json"})
         response.raise_for_status()
         orchestrator_connection.log_info(f"Journaliserede {len(doc_ids)} dokumenter.")
-        finaliser_dokumenter(go_api_url, doc_ids, session, orchestrator_connection)
 
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     specific_content = json.loads(queue_element.data)
