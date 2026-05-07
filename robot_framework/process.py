@@ -35,6 +35,7 @@ def text_to_html(body: str) -> str:
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     specific_content = json.loads(queue_element.data)
     caseid = specific_content.get("caseid")
+    udleveringsmappeid = specific_content.get("udleveringsmappeid").split('/')[-1]
     IndsenderMail = specific_content.get("to")
     SagsbehandlerMail = specific_content.get("from")
     UdviklerMail = orchestrator_connection.get_constant('balas')
@@ -69,8 +70,8 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     try:
         #Sætter brugerstyring på go-udleveringsmappe - aktiveres først, når vi opretter i produktionsmiljøet
         session = create_ntlm_session(go_username, go_password)
-        update_case_owner(go_api_url, go_username, go_password, caseid, IndsenderMail)
-        close_case(go_api_url= go_api_url, case_id = caseid, session = session)
+        update_case_owner(go_api_url, go_username, go_password, udleveringsmappeid, IndsenderMail)
+        close_case(go_api_url= go_api_url, case_id = udleveringsmappeid, session = session)
     except Exception as e:
         orchestrator_connection.log_error(f'Process failed to assign users to case {e}')
         raise e
