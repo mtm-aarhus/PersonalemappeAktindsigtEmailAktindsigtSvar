@@ -33,6 +33,7 @@ def text_to_html(body: str) -> str:
     html_body = safe.replace("\n", "<br>\n")
 
     return html_body
+
 def finaliser_dokumenter(go_api_url: str, doc_ids: list, session: requests.Session, orchestrator_connection: OrchestratorConnection):
     """Gør dokumenter endelige inden sagen lukkes."""
     url = f"{go_api_url}/_goapi/Documents/FinalizeMultiple/ByDocumentId"
@@ -128,7 +129,11 @@ def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, or
 def process(orchestrator_connection: OrchestratorConnection, queue_element: QueueElement | None = None) -> None:
     specific_content = json.loads(queue_element.data)
     caseid = specific_content.get("caseid")
-    udleveringsmappeid = specific_content.get("udleveringsmappeid").split('/')[-1]
+    udleveringsmappeid = specific_content.get("udleveringsmappeid")
+    if udleveringsmappeid:
+        udleveringsmappeid.split('/')[-1]
+    else:
+        udleveringsmappeid = None
     IndsenderMail = specific_content.get("to")
     SagsbehandlerMail = specific_content.get("from")
     UdviklerMail = orchestrator_connection.get_constant('balas')
@@ -159,15 +164,17 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     except Exception as e:
         orchestrator_connection.log_info(f"Failed to send success email: {e}")
         raise e
-    
-    try:
-        session = create_ntlm_session(go_username, go_password)
-        update_case_owner(go_api_url, go_username, go_password, udleveringsmappeid, IndsenderMail)
-        journaliser_sag(go_api_url, udleveringsmappeid, session, orchestrator_connection)
-        close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
-        result = close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
-        orchestrator_connection.log_info(f"close_case response: {result}")
-    except Exception as e:
-        orchestrator_connection.log_error(f'Process failed: {e}')
-        raise e
+    if udleveringsmappeid:
+        try:
+            session = create_ntlm_session(go_username, go_password)
+            update_case_owner(go_api_url, go_username, go_password, udleveringsmappeid, IndsenderMail)
+            journaliser_sag(go_api_url, udleveringsmappeid, session, orchestrator_connection)
+            close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
+            result = close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
+            orchestrator_connection.log_info(f"close_case response: {result}")
+        except Exception as e:
+            orchestrator_connection.log_error(f'Process failed: {e}')
+            raise e
+    else:
+        orchestrator_connection.log_info('No udleveringsmappe')
 
