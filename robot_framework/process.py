@@ -45,8 +45,7 @@ def finaliser_dokumenter(go_api_url: str, doc_ids: list, session: requests.Sessi
     response.raise_for_status()
     result = response.json()
     orchestrator_connection.log_info(f"Finaliser response: {result}")
-    if not result.get("Success"):
-        raise Exception(f"Endeliggørelse fejlede: {result.get('Message')}")
+
     orchestrator_connection.log_info(f"Endeliggjorde {len(doc_ids)} dokumenter.")
     
 def journaliser_sag(go_api_url: str, case_id: str, session: requests.Session, orchestrator_connection: OrchestratorConnection):
@@ -168,10 +167,30 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
         try:
             session = create_ntlm_session(go_username, go_password)
             update_case_owner(go_api_url, go_username, go_password, udleveringsmappeid, IndsenderMail)
-            journaliser_sag(go_api_url, udleveringsmappeid, session, orchestrator_connection)
-            close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
-            result = close_case(go_api_url=go_api_url, case_id=udleveringsmappeid, session=session)
-            orchestrator_connection.log_info(f"close_case response: {result}")
+
+            # Hent metadata for at få relativ URL
+            SagsMetaData = get_case_metadata(go_api_url, udleveringsmappeid, session)
+            SagsMetaData = json.loads(SagsMetaData).get("Metadata")
+            xdoc = ET.fromstring(SagsMetaData)
+            RelativeSagsUrl = xdoc.attrib.get("ows_CaseUrl")
+
+            # Hent dokumenter fra sagen
+            casefiles = get_case_documents(session, go_api_url, SagsURL=RelativeSagsUrl, SagsID=udleveringsmappeid)
+            doc_ids = [int(item.get("DocID")) for item in casefiles if item.get("DocID")]
+            orchestrator_connection.log_info(f"Fandt {len(doc_ids)} dokumenter.")
+
+            if doc_ids:
+                # Journalisér
+                url = f"{go_api_url}/_goapi/Documents/MarkMultipleAsCaseRecord/ByDocumentId"
+                response = session.post(url, data=json.dumps({"DocumentIds": doc_ids}), headers={"Content-Type": "application/json"})
+                response.raise_for_status()
+                orchestrator_connection.log_info(f"Journaliserede {len(doc_ids)} dokumenter.")
+
+                # Endeliggør
+                finaliser_dokumenter(go_api_url, doc_ids, session, orchestrator_connection)
+
+            # Luk sagen
+            close_case(udleveringsmappeid, session, go_api_url)
         except Exception as e:
             orchestrator_connection.log_error(f'Process failed: {e}')
             raise e

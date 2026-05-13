@@ -148,3 +148,99 @@ def close_case(case_id, session, go_api_url):
     response = session.post( url, headers=headers, data=payload)
 
     return response.text
+
+def get_case_metadata(gourl, sagsnummer, session):
+    url = f"{gourl}/_goapi/Cases/Metadata/{sagsnummer}"
+
+    session.headers.update({"Content-Type": "application/json"})
+
+    response = session.get( url)
+
+    return response.text
+
+import json
+import re
+
+def get_case_documents(session, GOAPI_URL, SagsURL, SagsID):
+
+    Akt = SagsURL.split("/")[1]
+    encoded_sags_id = SagsID.replace("-", "%2D")
+    ListURL = f"%27%2Fcases%2F{Akt}%2F{encoded_sags_id}%2FDokumenter%27"
+
+    ViewId = None
+    ikke_journaliseret_id = None
+    journaliseret_id = None
+    view_ids_to_use = []
+    all_rows = []
+
+    response = session.get(f"{GOAPI_URL}/{SagsURL}/_goapi/Administration/GetLeftMenuCounter")
+    response.raise_for_status()
+    
+    ViewsIDArray = json.loads(response.text)
+
+    for item in ViewsIDArray:
+        if item["ViewName"] == "UdenMapper.aspx":
+            ViewId = item["ViewId"]
+            break
+
+        elif item["ViewName"] == "Ikkejournaliseret.aspx":
+            ikke_journaliseret_id = item["ViewId"]
+            if ikke_journaliseret_id is None:
+                LinkURL = item["LinkUrl"]
+                response = session.get(f'{GOAPI_URL}{LinkURL}')
+                response.raise_for_status()
+
+                match = re.search(r'_spPageContextInfo\s*=\s*({.*?});', response.text, re.DOTALL)
+                if not match:
+                    raise ValueError("Kunne ikke finde _spPageContextInfo i HTML")
+
+                context_info = json.loads(match.group(1))
+                ikke_journaliseret_id = context_info.get("viewId", "").strip("{}")
+
+        elif item["ViewName"] == "Journaliseret.aspx":
+            journaliseret_id = item["ViewId"]
+            if journaliseret_id is None:
+                LinkURL = item["LinkUrl"]
+                response = session.get(f'{GOAPI_URL}{LinkURL}')
+                response.raise_for_status()
+
+                match = re.search(r'_spPageContextInfo\s*=\s*({.*?});', response.text, re.DOTALL)
+                if not match:
+                    raise ValueError("Kunne ikke finde _spPageContextInfo i HTML")
+
+                context_info = json.loads(match.group(1))
+                journaliseret_id = context_info.get("viewId", "").strip("{}")
+
+    if ViewId is None:
+        view_ids_to_use = [vid for vid in [ikke_journaliseret_id, journaliseret_id] if vid]
+
+    views = [ViewId] if ViewId else view_ids_to_use
+
+    if not views:
+        raise ValueError("Ingen gyldige ViewId fundet")
+
+    for current_view_id in views:
+        firstrun = True
+        MorePages = True
+        NextHref = None
+
+        while MorePages:
+            url = f"{GOAPI_URL}/{SagsURL}/_api/web/GetList(@listUrl)/RenderListDataAsStream"
+
+            if firstrun:
+                full_url = f"{url}?@listUrl={ListURL}&View={current_view_id}"
+            else:
+                full_url = f"{url}?@listUrl={ListURL}{NextHref.replace('?', '&')}"
+
+            response = session.post(full_url, timeout=500)
+            response.raise_for_status()
+
+            dokumentliste_json = response.json()
+            dokumentliste_rows = dokumentliste_json.get("Row", [])
+            all_rows.extend(dokumentliste_rows)
+
+            NextHref = dokumentliste_json.get("NextHref")
+            MorePages = bool(NextHref)
+            firstrun = False
+
+    return all_rows
