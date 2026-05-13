@@ -131,7 +131,7 @@ def process(orchestrator_connection: OrchestratorConnection, queue_element: Queu
     caseid = specific_content.get("caseid")
     udleveringsmappeid = specific_content.get("udleveringsmappeid")
     if udleveringsmappeid:
-        udleveringsmappeid.split('/')[-1]
+        udleveringsmappeid = udleveringsmappeid.split('/')[-1]
     else:
         udleveringsmappeid = None
     IndsenderMail = specific_content.get("to")
